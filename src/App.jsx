@@ -31,7 +31,7 @@ function App() {
   const [buildPanelOpen, setBuildPanelOpen] = useState(false);
   const [buildMsg, setBuildMsg] = useState('');
 
-  const initEngine = () => {
+  const initEngine = (overrideConfig = null) => {
     if (engineRef.current) engineRef.current.destroy();
 
     engineRef.current = createGameEngine(canvasRef.current, {
