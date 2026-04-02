@@ -17,6 +17,7 @@ function App() {
     weaponStr: 'Dano: 2.0 | Tiros: 1',
     biomeName: 'Setor Alpha', biomeColor: '#ffffff',
     showWormAlert: false,
+    shield: 100, maxShield: 100,
     food: 100, maxFood: 100,
     water: 100, maxWater: 100,
     hull: 100, maxHull: 100,
@@ -176,6 +177,16 @@ function App() {
             {/* Barras de Sobrevivência */}
             <div style={{ marginTop: '15px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <div>
+                <div style={{ fontSize: '0.75rem', color: '#0088ff', display: 'flex', justifyContent: 'space-between' }}>
+                  <span>ESCUDOS DEFLETORES</span>
+                  <span>{Math.floor(hud.shield)}/{hud.maxShield}</span>
+                </div>
+                <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.1)', borderRadius: '3px', overflow: 'hidden' }}>
+                  <div style={{ width: `${Math.max(0, hud.shield) / hud.maxShield * 100}%`, height: '100%', background: '#0088ff', transition: 'width 0.2s', boxShadow: hud.shield > 0 ? '0 0 8px #0088ff' : 'none' }}></div>
+                </div>
+              </div>
+
+              <div>
                 <div style={{ fontSize: '0.75rem', color: '#00e5ff', display: 'flex', justifyContent: 'space-between' }}>
                   <span>INTEGRIDADE DO CASCO</span>
                   <span>{Math.floor(hud.hull)}/{hud.maxHull}</span>
@@ -210,8 +221,8 @@ function App() {
               Bioma: <span style={{ color: hud.biomeColor }}>{hud.biomeName}</span>
             </div>
 
-            <div style={{ marginTop: '10px', fontSize: '0.8rem', color: hud.laserMode === 'EXTRACT' ? '#00e5ff' : '#ffaa00', fontWeight: 'bold' }}>
-              MODO RAIO (Q): {hud.laserMode === 'EXTRACT' ? 'EXTRAÇÃO DE MATÉRIA' : 'RAJADA GRAVITACIONAL'}
+            <div style={{ marginTop: '10px', fontSize: '0.8rem', color: hud.laserMode === 'EXTRACT' ? '#00e5ff' : (hud.laserMode === 'PIERCE' ? '#ff0033' : '#ffaa00'), fontWeight: 'bold' }}>
+              MODO RAIO (Q): {hud.laserMode === 'EXTRACT' ? 'EXTRAÇÃO DE MATÉRIA' : (hud.laserMode === 'PIERCE' ? 'FEIXE PERFURANTE' : 'RAJADA GRAVITACIONAL')}
             </div>
 
             <button className="btn" style={{ marginTop: '15px', padding: '8px', fontSize: '0.9rem' }} onClick={() => setGameState('CRAFTING')}>FABRICADOR (C)</button>

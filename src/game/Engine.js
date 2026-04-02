@@ -34,11 +34,12 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
         level: 1, xp: 0, xpNext: 50,
         dmgMult: 1.0, fireRate: 600, multishot: 1,
         speed: 1.0, recoil: 1.0,
+        shield: 100, maxShield: 100,
         food: 100, maxFood: 100,
         water: 100, maxWater: 100,
         hull: 100, maxHull: 100,
         inv: { ice: 0, leaves: 0, fruits: 0, minerals: 0, scrap: 0 },
-        upgrades: { homing: false, explosive: false },
+        upgrades: { homing: false, explosive: false, combatDrones: false, repairDrones: false, hyperdrive: false, scanner: false },
         laserMode: 'EXTRACT'
     };
     let lastShotTime = 0;
@@ -69,6 +70,7 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
             weaponStr: `Dano: ${(2 * stats.dmgMult).toFixed(1)} | Tiros: ${stats.multishot}`,
             biomeName: biome.name, biomeColor: biome.dustColor,
             showWormAlert: alertWorm,
+            shield: stats.shield, maxShield: stats.maxShield,
             food: stats.food, maxFood: stats.maxFood,
             water: stats.water, maxWater: stats.maxWater,
             hull: stats.hull, maxHull: stats.maxHull,
@@ -102,10 +104,26 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
         b.vy += (j * ny) / massB;
 
         if (a === player) {
-            stats.hull -= Math.min(15, (j / massA) * 2);
-            syncHUD();
-            if (stats.hull <= 0) die("Casco totalmente danificado após colisão.");
+            takeDamage(Math.min(15, (j / massA) * 2));
         }
+    }
+
+    let lastCombatTime = 0;
+    function takeDamage(amount) {
+        lastCombatTime = Date.now();
+        if (stats.shield > 0) {
+            if (amount > stats.shield) {
+                let remainder = amount - stats.shield;
+                stats.shield = 0;
+                stats.hull -= remainder;
+            } else {
+                stats.shield -= amount;
+            }
+        } else {
+            stats.hull -= amount;
+        }
+        syncHUD();
+        if (stats.hull <= 0) die("Casco totalmente destruído em combate.");
     }
 
     class ExtractorParticle {
@@ -164,6 +182,9 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
             this.hyperTimer = 0;
             this.hyperCooldown = 0;
             this.lastGravWave = 0;
+            this.hyperJumpCooldown = 0;
+            this.droneAngle = 0;
+            this.droneFireTimer = 0;
         }
 
         draw() {
@@ -192,8 +213,10 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
                     if (extractionTarget.resType === 'BIO') beamColor = '#00ff66';
                     if (extractionTarget.resType === 'MINERAL') beamColor = '#ffaa00';
                     if (extractionTarget.resType === 'SCRAP') beamColor = '#ff2a5f';
+                } else if (stats.laserMode === 'PIERCE') {
+                    beamColor = '#ff0033'; // Vermelho vivo
                 } else {
-                    beamColor = '#ffaa00'; // Cor da Rajada
+                    beamColor = '#ffaa00'; // Cor da Rajada / Repulse
                 }
 
                 ctx.strokeStyle = beamColor;
@@ -295,12 +318,35 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
             ctx.beginPath(); ctx.arc(-15, -23, 1.5, 0, Math.PI * 2); ctx.fill();
             ctx.beginPath(); ctx.arc(-15, 23, 1.5, 0, Math.PI * 2); ctx.fill();
 
+            // Desenhando Drones (Orbitais)
+            if (stats.upgrades.combatDrones || stats.upgrades.repairDrones) {
+                for (let i = 0; i < 3; i++) { // 3 slots of drones
+                    let hasCombat = stats.upgrades.combatDrones && i < 2;
+                    let hasRepair = stats.upgrades.repairDrones && i >= 2;
+                    let orbitR = 40 + Math.sin(Date.now() * 0.002 + i) * 5;
+                    let ang = this.droneAngle + (Math.PI * 2 / 3) * i;
+                    let dx = Math.cos(ang) * orbitR;
+                    let dy = Math.sin(ang) * orbitR;
+                    if (hasCombat || hasRepair) {
+                        ctx.save();
+                        ctx.translate(dx, dy);
+                        ctx.fillStyle = hasCombat ? '#ff0033' : '#00ff66';
+                        ctx.beginPath(); ctx.arc(0, 0, 4, 0, Math.PI * 2); ctx.fill();
+                        ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.stroke();
+                        ctx.restore();
+                    }
+                }
+            }
+
             ctx.shadowBlur = 0;
             ctx.globalAlpha = 1;
             ctx.restore();
         }
 
         update() {
+            // Crescimento Baseado em XP/Level:
+            this.radius = 25 + (stats.level - 1) * 1.5;
+
             // === HYPER SPEED (Space Bar) — one-time burst, then glide ===
             if (keys.space && !this.hyperSpeed && this.hyperCooldown <= 0) {
                 this.hyperSpeed = true;
@@ -331,6 +377,42 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
             if (this.hyperCooldown > 0) this.hyperCooldown--;
 
             let currentThrust = this.baseThrust * stats.speed;
+
+            // === HYPERDRIVE JUMP (Shift) ===
+            if (keys.shift && stats.upgrades.hyperdrive && this.hyperJumpCooldown <= 0) {
+                this.hyperJumpCooldown = 800; // grande cooldown
+                createExplosion(this.x, this.y, '#b142ff', 60);
+                triggerShake(20);
+                let jumpDist = 6000;
+                let mouseWXY = getMouseWorld();
+                let jumpAngle = Math.atan2(mouseWXY.y - this.y, mouseWXY.x - this.x);
+                this.x += Math.cos(jumpAngle) * jumpDist;
+                this.y += Math.sin(jumpAngle) * jumpDist;
+                camera.x = this.x; camera.y = this.y;
+                createExplosion(this.x, this.y, '#ffffff', 80);
+                AudioSys.playTone(100, 'square', 0.2, 0.5, 900);
+            }
+            if (this.hyperJumpCooldown > 0) this.hyperJumpCooldown--;
+
+            // Drones orbit angle
+            this.droneAngle += 0.04;
+            if (stats.upgrades.repairDrones) {
+                stats.hull = Math.min(stats.maxHull, stats.hull + 0.05); // Reparo ativo contínuo
+            }
+            if (stats.upgrades.combatDrones) {
+                this.droneFireTimer++;
+                if (this.droneFireTimer > 40) {
+                    this.droneFireTimer = 0;
+                    // Shoot at closest pirate!
+                    let closestPirate = null; let minDist = 700;
+                    pirates.forEach(p => { let d = Math.hypot(p.x - this.x, p.y - this.y); if (d < minDist) { minDist = d; closestPirate = p; } });
+                    if (closestPirate) {
+                        let ang = Math.atan2(closestPirate.y - this.y, closestPirate.x - this.x);
+                        projectiles.push(new Projectile(this.x, this.y, Math.cos(ang) * 22, Math.sin(ang) * 22, '#ff0033', false, 8 * stats.dmgMult, false));
+                        AudioSys.playTone(600, 'square', 0.02, 0.05, 1200);
+                    }
+                }
+            }
 
             let mouseWorldX = (mouseScreen.x - width / 2) / zoom + camera.x;
             let mouseWorldY = (mouseScreen.y - height / 2) / zoom + camera.y;
@@ -539,6 +621,19 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
                     if (!extractionTarget.mass) force = 4.0; // debris é mais leve
                     extractionTarget.vx += Math.cos(anglePush) * force;
                     extractionTarget.vy += Math.sin(anglePush) * force;
+                } else if (stats.laserMode === 'PIERCE') {
+                    // Continuous damage to pirates intersecting the beam
+                    let p1 = { x: this.x, y: this.y }, p2 = { x: extractionTarget.x, y: extractionTarget.y };
+                    pirates.forEach(pir => {
+                        let dot = (((pir.x - p1.x) * (p2.x - p1.x)) + ((pir.y - p1.y) * (p2.y - p1.y))) / (Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+                        let closestX = p1.x + dot * (p2.x - p1.x);
+                        let closestY = p1.y + dot * (p2.y - p1.y);
+                        if (dot >= 0 && dot <= 1 && Math.hypot(closestX - pir.x, closestY - pir.y) < pir.radius + 15) {
+                            pir.hp -= 2.5 * stats.dmgMult; // ignores armor partly
+                            if (Math.random() < 0.2) createExplosion(pir.x, pir.y, '#ff0033', 5);
+                            if (pir.hp <= 0) destroyPirate(pir);
+                        }
+                    });
                 }
             }
         }
@@ -1160,6 +1255,10 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
 
         if (stats.hull <= 0) die("Privação de Recursos ou Danos Críticos.");
 
+        if (Date.now() - lastCombatTime > 5000 && stats.shield < stats.maxShield) {
+            stats.shield = Math.min(stats.maxShield, stats.shield + 0.3);
+        }
+
         if (Math.random() < 0.1) syncHUD();
     }
 
@@ -1308,11 +1407,12 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
 
             if (prj.isEnemy && gameState === 'PLAYING') {
                 if (Math.hypot(prj.x - player.x, prj.y - player.y) < player.radius + prj.radius) {
-                    stats.hull -= prj.damage;
-                    syncHUD();
+                    takeDamage(prj.damage);
+                    // Knockback no player
+                    player.vx += prj.vx * 0.15;
+                    player.vy += prj.vy * 0.15;
                     createExplosion(prj.x, prj.y, '#ff2a5f', 10);
                     AudioSys.sfx.hit();
-                    if (stats.hull <= 0) die("Casco destruído por Piratas Espaciais.");
                     hit = true;
                 } else {
                     // Tiros piratas não atravessam planetas
@@ -1332,6 +1432,10 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
                     let pir = pirates[j];
                     if (Math.hypot(prj.x - pir.x, prj.y - pir.y) < pir.radius + prj.radius) {
                         pir.hp -= prj.damage;
+                        // IMPACT WEIGHT / KNOCKBACK nas Naves Inimigas
+                        pir.vx += prj.vx * 0.08;
+                        pir.vy += prj.vy * 0.08;
+
                         if (stats.upgrades.explosive) applyAreaDamage(prj.x, prj.y, 80, prj.damage);
                         else createExplosion(prj.x, prj.y, '#ffaa00', 8);
 
@@ -1373,10 +1477,8 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
                     let dist = Math.hypot(player.x - pir.x, player.y - pir.y);
                     if (dist < player.radius + pir.radius) {
                         resolveCollision(player, pir, 0.8);
-                        stats.hull -= 10;
-                        syncHUD();
+                        takeDamage(10);
                         createExplosion(pir.x, pir.y, '#ff2a5f', 15);
-                        if (stats.hull <= 0) die("Colisão fatal com uma Nave Pirata.");
                     }
                 }
 
@@ -1515,14 +1617,16 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
 
     const onKeyDown = (e) => {
         let key = e.key.toLowerCase();
-        if (key === 'w' || key === 'arrowup') keys.w = true;
-        if (key === 'a' || key === 'arrowleft') keys.a = true;
-        if (key === 's' || key === 'arrowdown') keys.s = true;
-        if (key === 'd' || key === 'arrowright') keys.d = true;
+        if (key === 'w') keys.w = true;
+        if (key === 'a') keys.a = true;
+        if (key === 's') keys.s = true;
+        if (key === 'd') keys.d = true;
         if (e.code === 'Space') { keys.space = true; e.preventDefault(); }
+        if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') { keys.shift = true; }
         if (key === 'e') keys.e = true;
         if (key === 'q') {
-            stats.laserMode = stats.laserMode === 'EXTRACT' ? 'REPULSE' : 'EXTRACT';
+            const modes = ['EXTRACT', 'REPULSE', 'PIERCE'];
+            stats.laserMode = modes[(modes.indexOf(stats.laserMode) + 1) % modes.length];
             syncHUD();
         }
         if (key === 'c') {
@@ -1654,6 +1758,26 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
             if (id === 'homing_shots' && !stats.upgrades.homing && stats.inv.scrap >= 10 && stats.inv.minerals >= 15) {
                 stats.inv.scrap -= 10; stats.inv.minerals -= 15;
                 stats.upgrades.homing = true;
+                syncHUD(); return true;
+            }
+            if (id === 'combat_drones' && !stats.upgrades.combatDrones && stats.inv.scrap >= 35 && stats.inv.minerals >= 30) {
+                stats.inv.scrap -= 35; stats.inv.minerals -= 30;
+                stats.upgrades.combatDrones = true;
+                syncHUD(); return true;
+            }
+            if (id === 'repair_drones' && !stats.upgrades.repairDrones && stats.inv.minerals >= 50 && stats.inv.ice >= 30) {
+                stats.inv.minerals -= 50; stats.inv.ice -= 30;
+                stats.upgrades.repairDrones = true;
+                syncHUD(); return true;
+            }
+            if (id === 'scanner' && !stats.upgrades.scanner && stats.inv.scrap >= 20 && stats.inv.leaves >= 20) {
+                stats.inv.scrap -= 20; stats.inv.leaves -= 20;
+                stats.upgrades.scanner = true;
+                syncHUD(); return true;
+            }
+            if (id === 'hyperdrive' && !stats.upgrades.hyperdrive && stats.inv.scrap >= 50 && stats.inv.ice >= 50) {
+                stats.inv.scrap -= 50; stats.inv.ice -= 50;
+                stats.upgrades.hyperdrive = true;
                 syncHUD(); return true;
             }
             if (id === 'explosive_shots' && !stats.upgrades.explosive && stats.inv.minerals >= 20) {
