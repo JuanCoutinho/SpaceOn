@@ -39,10 +39,12 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
         water: 100, maxWater: 100,
         hull: 100, maxHull: 100,
         inv: { ice: 0, leaves: 0, fruits: 0, minerals: 0, scrap: 0 },
-        upgrades: { homing: false, explosive: false, combatDrones: false, repairDrones: false, hyperdrive: false, scanner: false },
+        upgrades: { homing: false, explosive: false, combatDrones: false, repairDrones: false, hyperdrive: false, scanner: false, cloak: false, flares: false },
         laserMode: 'EXTRACT'
     };
     let lastShotTime = 0;
+    let cloakTimer = 0;
+    let flares = [];
 
     const BIOMES = {
         ALPHA: { name: "Setor Alpha", maxDist: 4000, bg: '#030308', dustColor: '#ffffff' },
@@ -189,6 +191,7 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
 
         draw() {
             ctx.save();
+            if (cloakTimer > 0) ctx.globalAlpha = 0.3;
 
             if (this.trail.length > 2) {
                 ctx.beginPath();
@@ -464,9 +467,9 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
             camera.y += (this.y - camera.y) * 0.08;
 
             this.draw();
-            this.shoot();
+            if (cloakTimer <= 0) this.shoot();
             this.useEKey();
-            this.extract();
+            if (cloakTimer <= 0) this.extract();
         }
 
         shoot() {
@@ -853,17 +856,23 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
             ctx.restore();
         }
         update() {
-            let distToPlayer = Math.hypot(player.x - this.x, player.y - this.y);
-
-            if (distToPlayer < 1200) {
-                this.state = 'ATTACK';
-                this.targetX = player.x;
-                this.targetY = player.y;
-            } else if (this.state === 'ATTACK' && distToPlayer > 1800) {
+            let targetX = player.x;
+            let targetY = player.y;
+            if (this.isEnemy) {
+                // Ignore player if cloaked
+                if (cloakTimer > 0) return;
+                let closestFlare = null; let fDist = 9999;
+                flares.forEach(f => { let d = Math.hypot(f.x - this.x, f.y - this.y); if (d < fDist) { fDist = d; closestFlare = f; } });
+                if (closestFlare) { targetX = closestFlare.x; targetY = closestFlare.y; }
+            } else {
                 this.state = 'WANDER';
             }
 
             if (this.state === 'WANDER') {
+                this.x += this.vx * 0.5;
+                this.y += this.vy * 0.5;
+                let dist = Math.hypot(player.x - this.x, player.y - this.y);
+                if (dist < 1200 && cloakTimer <= 0) this.state = 'ATTACK';
                 let distToTarget = Math.hypot(this.targetX - this.x, this.targetY - this.y);
                 if (distToTarget < 100) {
                     this.targetX = this.x + (Math.random() - 0.5) * 2000;
@@ -871,7 +880,7 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
                 }
             }
 
-            let desiredAngle = Math.atan2(this.targetY - this.y, this.targetX - this.x);
+            let desiredAngle = Math.atan2(targetY - this.y, targetX - this.x);
             let angleDiff = desiredAngle - this.angle;
             while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
             while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
@@ -881,7 +890,7 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
             this.vx += Math.cos(this.angle) * this.thrust;
             this.vy += Math.sin(this.angle) * this.thrust;
 
-            if (this.state === 'ATTACK' && distToPlayer < (400 + this.level * 50)) {
+            if (this.state === 'ATTACK' && Math.hypot(player.x - this.x, player.y - this.y) < (400 + this.level * 50)) {
                 this.vx -= Math.cos(this.angle) * this.thrust * 1.5;
                 this.vy -= Math.sin(this.angle) * this.thrust * 1.5;
             }
@@ -891,7 +900,7 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
             this.x += this.vx;
             this.y += this.vy;
 
-            if (this.state === 'ATTACK' && distToPlayer < 900 && Date.now() - this.lastShot > this.fireRate) {
+            if (this.state === 'ATTACK' && Math.hypot(player.x - this.x, player.y - this.y) < 900 && Date.now() - this.lastShot > this.fireRate) {
                 this.lastShot = Date.now();
                 AudioSys.sfx.enemyShoot();
 
@@ -1387,6 +1396,12 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
         ctx.translate(-camera.x, -camera.y);
 
         if (gameState === 'PLAYING') {
+            if (cloakTimer > 0) cloakTimer--;
+            for (let i = flares.length - 1; i >= 0; i--) {
+                flares[i].update();
+                if (flares[i].life <= 0) flares.splice(i, 1);
+            }
+
             suns.forEach(s => {
                 if (Math.hypot(s.x - player.x, s.y - player.y) < 4000) {
                     let force = s.mass / 2500000;
@@ -1558,6 +1573,9 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
                     type: 'PLAYER',
                     name: playerName,
                     score: score,
+                    level: stats.level,
+                    isCloaked: cloakTimer > 0,
+                    laserMode: stats.laserMode,
                     x: player.x, y: player.y,
                     angle: player.angle,
                     hyperSpeed: player.hyperSpeed,
@@ -1574,13 +1592,22 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
                 cp.obj.y += (d.y - cp.obj.y) * 0.3;
                 cp.obj.angle += (d.angle - cp.obj.angle) * 0.3;
                 cp.obj.hyperSpeed = d.hyperSpeed;
+                cp.obj.radius = 25 + ((d.level || 1) - 1) * 1.5;
+
+                ctx.save();
+                if (d.isCloaked) ctx.globalAlpha = 0.3;
                 cp.obj.draw();
+                ctx.restore();
+
                 // Simple laser mock
                 if (d.rightMouse) {
                     ctx.beginPath();
                     ctx.moveTo(cp.obj.x, cp.obj.y);
                     ctx.lineTo(cp.obj.x + Math.cos(cp.obj.angle) * 400, cp.obj.y + Math.sin(cp.obj.angle) * 400);
-                    ctx.strokeStyle = '#00ff66';
+                    let beamColor = '#ffaa00';
+                    if (d.laserMode === 'PIERCE') beamColor = '#ff0033';
+                    else if (d.laserMode === 'EXTRACT') beamColor = '#00e5ff';
+                    ctx.strokeStyle = beamColor;
                     ctx.lineWidth = 3;
                     ctx.stroke();
                 }
@@ -1591,6 +1618,24 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
             if (Math.random() < 0.05 && callbacks.onUpdatePlayers) {
                 callbacks.onUpdatePlayers(uiList.sort((a, b) => b.score - a.score));
             }
+        }
+
+        // Radar Pips
+        if (stats.upgrades.scanner && gameState === 'PLAYING') {
+            ctx.save();
+            let halfW = (width / 2) / zoom, halfH = (height / 2) / zoom;
+            let drawPip = (x, y, color) => {
+                let dx = x - camera.x, dy = y - camera.y;
+                if (Math.abs(dx) > halfW || Math.abs(dy) > halfH) {
+                    let scale = Math.min(Math.abs((halfW - 30) / dx), Math.abs((halfH - 30) / dy));
+                    ctx.fillStyle = color;
+                    ctx.beginPath(); ctx.arc(camera.x + dx * scale, camera.y + dy * scale, 6, 0, Math.PI * 2); ctx.fill();
+                    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.stroke();
+                }
+            };
+            pirates.forEach(p => drawPip(p.x, p.y, '#ff2a5f'));
+            planets.forEach(p => { if (p.radius > 20) drawPip(p.x, p.y, '#00e5ff'); });
+            ctx.restore();
         }
 
         ctx.restore();
@@ -1624,6 +1669,15 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
         if (e.code === 'Space') { keys.space = true; e.preventDefault(); }
         if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') { keys.shift = true; }
         if (key === 'e') keys.e = true;
+        if (key === 'z' && stats.upgrades.cloak && cloakTimer <= 0) { cloakTimer = 600; AudioSys.playTone(300, 'sine', 0.2, 0.5, 400); }
+        if (key === 'x' && stats.upgrades.flares && stats.inv.scrap >= 2) {
+            stats.inv.scrap -= 2; syncHUD();
+            flares.push({
+                x: player.x, y: player.y, vx: (Math.random() - 0.5) * 10, vy: (Math.random() - 0.5) * 10, life: 300,
+                update: function () { this.x += this.vx; this.y += this.vy; this.life--; if (Math.random() < 0.5) particles.push(new Particle(this.x, this.y, '#ffaa00', 0, 0, 5)); }
+            });
+            AudioSys.playTone(800, 'square', 0.1, 0.1, 1000);
+        }
         if (key === 'q') {
             const modes = ['EXTRACT', 'REPULSE', 'PIERCE'];
             stats.laserMode = modes[(modes.indexOf(stats.laserMode) + 1) % modes.length];
@@ -1778,6 +1832,16 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
             if (id === 'hyperdrive' && !stats.upgrades.hyperdrive && stats.inv.scrap >= 50 && stats.inv.ice >= 50) {
                 stats.inv.scrap -= 50; stats.inv.ice -= 50;
                 stats.upgrades.hyperdrive = true;
+                syncHUD(); return true;
+            }
+            if (id === 'cloak' && !stats.upgrades.cloak && stats.inv.scrap >= 40 && stats.inv.leaves >= 30) {
+                stats.inv.scrap -= 40; stats.inv.leaves -= 30;
+                stats.upgrades.cloak = true;
+                syncHUD(); return true;
+            }
+            if (id === 'flares' && !stats.upgrades.flares && stats.inv.minerals >= 10 && stats.inv.ice >= 10) {
+                stats.inv.minerals -= 10; stats.inv.ice -= 10;
+                stats.upgrades.flares = true;
                 syncHUD(); return true;
             }
             if (id === 'explosive_shots' && !stats.upgrades.explosive && stats.inv.minerals >= 20) {
