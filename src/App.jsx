@@ -66,7 +66,7 @@ function App() {
       onUpdatePlayers: (list) => {
         setPlayersList(list);
       }
-    }, multiplayerConfig, playerName);
+    }, overrideConfig || multiplayerConfig, playerName);
   };
 
   useEffect(() => {
@@ -97,7 +97,7 @@ function App() {
         startGame(true, false);
         setTimeout(() => {
           if (engineRef.current) engineRef.current.destroy();
-          initEngine();
+          initEngine({ active: true, isHost: false });
           engineRef.current.start();
           setGameState('PLAYING');
         }, 50);
@@ -128,7 +128,7 @@ function App() {
       startGame(true, true);
       setTimeout(() => {
         if (engineRef.current) engineRef.current.destroy();
-        initEngine();
+        initEngine({ active: true, isHost: true });
         engineRef.current.start();
         setGameState('PLAYING');
       }, 50);
