@@ -95,11 +95,21 @@ function App() {
     networkManager.setCallbacks({
       onConnect: () => {
         startGame(true, false);
+        setTimeout(() => {
+          if (engineRef.current) engineRef.current.destroy();
+          initEngine();
+          engineRef.current.start();
+          setGameState('PLAYING');
+        }, 50);
       },
       onError: (err) => {
         if (err && err.type === 'taken') {
           // Room exists, join it
           networkManager.joinGame(GLOBAL_ROOM_ID);
+        } else {
+          console.error("Multiplayer Error:", err);
+          alert("Network Error: " + (err ? err.type : 'Unknown'));
+          setGameState('START');
         }
       },
       onData: (data, senderId) => {
@@ -116,6 +126,12 @@ function App() {
       // Room didn't exist, we created it!
       setMultiplayerConfig(prev => ({ ...prev, active: true, isHost: true }));
       startGame(true, true);
+      setTimeout(() => {
+        if (engineRef.current) engineRef.current.destroy();
+        initEngine();
+        engineRef.current.start();
+        setGameState('PLAYING');
+      }, 50);
     });
   };
 
