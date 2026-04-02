@@ -28,6 +28,7 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
     let extractionTarget = null;
     let extractorParticles = []; // Novas partículas de Gamefeel ("+1 Gelo")
 
+    let player = null;
     let connectedPeers = {}; // { 'peerId': { data, obj } }
 
     let stats = {
