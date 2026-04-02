@@ -1177,8 +1177,8 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
             suns.push(new Sun(Math.cos(a) * d, Math.sin(a) * d, Math.random() * 60 + 50));
         }
 
-        for (let i = 0; i < 20; i++) {
-            let squadSize = Math.floor(Math.random() * 4) + 1;
+        for (let i = 0; i < 4; i++) {
+            let squadSize = Math.floor(Math.random() * 2) + 1;
             let cx = (Math.random() - 0.5) * 20000;
             let cy = (Math.random() - 0.5) * 20000;
             for (let j = 0; j < squadSize; j++) pirates.push(new PirateShip(cx + (Math.random() - 0.5) * 400, cy + (Math.random() - 0.5) * 400));
@@ -1649,10 +1649,10 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
             planets.push(new Planet(player.x + Math.cos(a) * dist, player.y + Math.sin(a) * dist, r));
         }
 
-        if (pirates.length < 20 && Math.random() < 0.02 && gameState === 'PLAYING') {
-            let squadSize = Math.floor(Math.random() * 4) + 1;
+        if (pirates.length < 15 && Math.random() < 0.01 && gameState === 'PLAYING') {
+            let squadSize = Math.floor(Math.random() * 2) + 1;
             let a = Math.random() * Math.PI * 2;
-            let r = (width / zoom) * 1.5;
+            let r = (width / zoom) * 1.8;
             let cx = player.x + Math.cos(a) * r;
             let cy = player.y + Math.sin(a) * r;
             for (let j = 0; j < squadSize; j++) pirates.push(new PirateShip(cx + (Math.random() - 0.5) * 300, cy + (Math.random() - 0.5) * 300));
