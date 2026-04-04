@@ -429,29 +429,21 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
 
             // Normal movement only when NOT in hyper speed
             if (!this.hyperSpeed) {
-                if (keys.w) {
-                    this.vx += Math.cos(this.angle) * currentThrust;
-                    this.vy += Math.sin(this.angle) * currentThrust;
+                let moved = false;
+                if (keys.w) { this.vy -= currentThrust; moved = true; }
+                if (keys.s) { this.vy += currentThrust; moved = true; }
+                if (keys.a) { this.vx -= currentThrust; moved = true; }
+                if (keys.d) { this.vx += currentThrust; moved = true; }
+
+                if (moved) {
                     AudioSys.sfx.engine();
                     if (Math.random() < 0.4) {
                         let px = this.x - Math.cos(this.angle) * this.radius;
                         let py = this.y - Math.sin(this.angle) * this.radius;
                         particles.push(new Particle(px, py, '#00e5ff',
-                            this.vx - Math.cos(this.angle) * 4 + (Math.random() - 0.5) * 2,
-                            this.vy - Math.sin(this.angle) * 4 + (Math.random() - 0.5) * 2, 8));
+                            this.vx * 0.5 + (Math.random() - 0.5) * 4,
+                            this.vy * 0.5 + (Math.random() - 0.5) * 4, 8));
                     }
-                }
-                if (keys.s) {
-                    this.vx -= Math.cos(this.angle) * currentThrust * 0.4;
-                    this.vy -= Math.sin(this.angle) * currentThrust * 0.4;
-                }
-                if (keys.a) {
-                    this.vx += Math.cos(this.angle - Math.PI / 2) * currentThrust * 0.5;
-                    this.vy += Math.sin(this.angle - Math.PI / 2) * currentThrust * 0.5;
-                }
-                if (keys.d) {
-                    this.vx += Math.cos(this.angle + Math.PI / 2) * currentThrust * 0.5;
-                    this.vy += Math.sin(this.angle + Math.PI / 2) * currentThrust * 0.5;
                 }
             }
 
@@ -779,9 +771,9 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
             this.level = Math.floor(Math.random() * stats.level) + 1;
             this.radius = 20 + (this.level * 2);
             this.angle = Math.random() * Math.PI * 2;
-            this.thrust = 0.2 + (this.level * 0.05);
+            this.thrust = 0.1 + (this.level * 0.02);
             this.friction = 0.96;
-            this.hp = 10 + (this.level * 5);
+            this.hp = 5 + (this.level * 2);
             this.fireRate = 1200 - Math.min(800, this.level * 100);
             this.lastShot = Date.now();
             this.state = 'WANDER';
@@ -1178,15 +1170,46 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
 
     function initStars() {
         backgroundStars = [];
-        for (let i = 0; i < 400; i++) {
+        const colors = ['#ffffff', '#00e5ff', '#ff00ff', '#ffaa00', '#aaaaaa'];
+        for (let i = 0; i < 1200; i++) {
             backgroundStars.push({
-                x: (Math.random() - 0.5) * 30000,
-                y: (Math.random() - 0.5) * 30000,
-                size: Math.random() * 2 + 0.5,
-                parallax: Math.random() * 0.08 + 0.02,
-                color: Math.random() > 0.8 ? '#00e5ff' : '#aaaaaa'
+                x: (Math.random() - 0.5) * 40000,
+                y: (Math.random() - 0.5) * 40000,
+                size: Math.random() * 2.5 + 0.5,
+                parallax: Math.random() * 0.15 + 0.02,
+                color: colors[Math.floor(Math.random() * colors.length)]
             });
         }
+    }
+
+    function drawNebulaBackground() {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+
+        // Simular algumas nebulosas paradas e grandes
+        // Como não queremos recalcular tudo no render loop, vamos fazer algo baseado na camera
+        const numNebulas = 5;
+        for (let i = 0; i < numNebulas; i++) {
+            let nx = Math.sin(i * 1234.5) * 15000 - camera.x * 0.03;
+            let ny = Math.cos(i * 6789.0) * 15000 - camera.y * 0.03;
+            let radius = 2000 + Math.abs(Math.sin(i * 111)) * 3000;
+
+            // Desenhar apenas se estiver perto da tela para otimização
+            if (nx > -width/2 - radius && nx < width/2 + radius && ny > -height/2 - radius && ny < height/2 + radius) {
+                let grad = ctx.createRadialGradient(nx, ny, 0, nx, ny, radius);
+                let r = Math.floor(100 + Math.abs(Math.sin(i)) * 155);
+                let g = Math.floor(50 + Math.abs(Math.cos(i)) * 100);
+                let b = Math.floor(150 + Math.abs(Math.sin(i * 2)) * 105);
+
+                grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.15)`);
+                grad.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, 0.05)`);
+                grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+                ctx.fillStyle = grad;
+                ctx.fillRect(nx - radius, ny - radius, radius * 2, radius * 2);
+            }
+        }
+        ctx.restore();
     }
 
     player = new Player();
@@ -1315,6 +1338,8 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
         let biome = getCurrentBiome(player.x, player.y);
         ctx.fillStyle = biome.bg;
         ctx.fillRect(-width / 2, -height / 2, width, height);
+
+        drawNebulaBackground();
 
         ctx.save();
         ctx.fillStyle = '#fff';
@@ -1735,7 +1760,7 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
             satellites.push(new Satellite(player.x + Math.cos(a) * dist, player.y + Math.sin(a) * dist));
         }
 
-        if (pirates.length < 5 && Math.random() < 0.002 && gameState === 'PLAYING') {
+        if (pirates.length < 3 && Math.random() < 0.0005 && gameState === 'PLAYING') {
             let squadSize = Math.floor(Math.random() * 2) + 1;
             let a = Math.random() * Math.PI * 2;
             let r = (width / zoom) * 1.8;
