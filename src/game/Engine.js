@@ -23,7 +23,7 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
         TURRET: { name: 'Torreta 🔫', cost: { minerals: 3, scrap: 3 }, color: '#ff2a5f', produces: null, ratePerTick: 0, h: 32, range: 700, damage: 25, fireRate: 90 },
     };
 
-    let planets = [], suns = [], worms = [], blackHoles = [], wormholes = [], projectiles = [], gravityWaves = [], particles = [], floatingTexts = [], pirates = [], debris = [];
+    let planets = [], suns = [], worms = [], blackHoles = [], wormholes = [], projectiles = [], gravityWaves = [], particles = [], floatingTexts = [], pirates = [], debris = [], satellites = [];
     let backgroundStars = [];
     let extractionTarget = null;
     let extractorParticles = []; // Novas partículas de Gamefeel ("+1 Gelo")
@@ -567,7 +567,7 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
             let closest = null;
             let closestDist = Infinity;
 
-            const targets = [...planets, ...debris];
+            const targets = [...planets, ...debris, ...satellites];
             targets.forEach(p => {
                 let dToMouse = Math.hypot(p.x - mouseWorldX, p.y - mouseWorldY);
                 let dToShip = Math.hypot(p.x - this.x, p.y - this.y);
@@ -613,7 +613,8 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
 
                     if (extractionTarget.radius < 5) {
                         createExplosion(extractionTarget.x, extractionTarget.y, extractionTarget.baseColor || '#ff2a5f', 20);
-                        if (extractionTarget.mass) planets.splice(planets.indexOf(extractionTarget), 1);
+                        if (planets.includes(extractionTarget)) planets.splice(planets.indexOf(extractionTarget), 1);
+                        else if (satellites.includes(extractionTarget)) satellites.splice(satellites.indexOf(extractionTarget), 1);
                         else debris.splice(debris.indexOf(extractionTarget), 1);
                         extractionTarget = null;
                     } else if (extractionTarget.mass) {
@@ -780,7 +781,7 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
             this.angle = Math.random() * Math.PI * 2;
             this.thrust = 0.2 + (this.level * 0.05);
             this.friction = 0.96;
-            this.hp = 30 + (this.level * 20);
+            this.hp = 10 + (this.level * 5);
             this.fireRate = 1200 - Math.min(800, this.level * 100);
             this.lastShot = Date.now();
             this.state = 'WANDER';
@@ -919,6 +920,38 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
                 }
             }
 
+            this.draw();
+        }
+    }
+
+    class Satellite {
+        constructor(x, y) {
+            this.x = x; this.y = y;
+            this.radius = 40;
+            this.vx = (Math.random() - 0.5) * 1;
+            this.vy = (Math.random() - 0.5) * 1;
+            this.hp = 50;
+            this.mass = this.radius * this.radius;
+            this.type = 'SUCATA'; // Para loot
+            this.resType = 'SCRAP'; // Para extração
+            this.rot = Math.random() * Math.PI * 2;
+            this.vRot = (Math.random() - 0.5) * 0.05;
+        }
+        draw() {
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            ctx.rotate(this.rot);
+
+            ctx.font = `${this.radius * 2}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('🛰️', 0, 0);
+
+            ctx.restore();
+        }
+        update() {
+            this.x += this.vx; this.y += this.vy;
+            this.rot += this.vRot;
             this.draw();
         }
     }
@@ -1159,8 +1192,14 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
     player = new Player();
 
     function spawnWorldEntities() {
-        planets = []; suns = []; worms = []; blackHoles = []; wormholes = []; pirates = []; debris = [];
+        planets = []; suns = []; worms = []; blackHoles = []; wormholes = []; pirates = []; debris = []; satellites = [];
         initStars();
+
+        for (let i = 0; i < 10; i++) {
+            let a = Math.random() * Math.PI * 2;
+            let d = Math.random() * 20000 + 1500;
+            satellites.push(new Satellite(Math.cos(a) * d, Math.sin(a) * d));
+        }
 
         for (let i = 0; i < 80; i++) {
             let a = Math.random() * Math.PI * 2;
@@ -1482,6 +1521,30 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
                     }
                 }
             }
+            if (!hit) {
+                for (let j = satellites.length - 1; j >= 0; j--) {
+                    let s = satellites[j];
+                    if (Math.hypot(prj.x - s.x, prj.y - s.y) < s.radius + prj.radius) {
+                        s.hp -= prj.damage;
+                        createExplosion(prj.x, prj.y, '#fff', 5);
+                        AudioSys.sfx.hit();
+
+                        if (s.hp <= 0) {
+                            if (!prj.isEnemy) {
+                                stats.inv.scrap += 5;
+                                syncHUD();
+                                floatingTexts.push(new FloatingText(s.x, s.y, "+5 SUCATA", '#ffaa00'));
+                            }
+                            createExplosion(s.x, s.y, '#fff', 20);
+                            for (let k = 0; k < 3; k++) {
+                                debris.push(new Debris(s.x + (Math.random() - 0.5) * 20, s.y + (Math.random() - 0.5) * 20, 8 + Math.random() * 8));
+                            }
+                            satellites.splice(j, 1);
+                        }
+                        hit = true; break;
+                    }
+                }
+            }
             if (hit || prj.life <= 0) projectiles.splice(i, 1);
         }
 
@@ -1530,6 +1593,23 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
                         createExplosion(player.x, player.y, '#fff', 5);
                         triggerShake(5);
                         if (stats.hull <= 0) die("Destruído por impacto orbital.");
+                    }
+                }
+            }
+
+            for (let i = satellites.length - 1; i >= 0; i--) {
+                let s = satellites[i];
+                if (Math.abs(s.x - camera.x) < (s.radius + 4000) / zoom && Math.abs(s.y - camera.y) < (s.radius + 4000) / zoom) s.update();
+
+                if (!player.hyperSpeed) {
+                    let dist = Math.hypot(player.x - s.x, player.y - s.y);
+                    if (dist < player.radius + s.radius) {
+                        resolveCollision(player, s, 0.6);
+                        stats.hull -= 2;
+                        syncHUD();
+                        createExplosion(player.x, player.y, '#fff', 5);
+                        triggerShake(2);
+                        if (stats.hull <= 0) die("Destruído por colisão com satélite.");
                     }
                 }
             }
@@ -1649,7 +1729,13 @@ export function createGameEngine(canvas, callbacks, multiConfig = { active: fals
             planets.push(new Planet(player.x + Math.cos(a) * dist, player.y + Math.sin(a) * dist, r));
         }
 
-        if (pirates.length < 15 && Math.random() < 0.01 && gameState === 'PLAYING') {
+        if (satellites.length < 10 && Math.random() < 0.005 && gameState === 'PLAYING') {
+            let a = Math.random() * Math.PI * 2;
+            let dist = (width / zoom) * (Math.random() * 0.5 + 1.2);
+            satellites.push(new Satellite(player.x + Math.cos(a) * dist, player.y + Math.sin(a) * dist));
+        }
+
+        if (pirates.length < 5 && Math.random() < 0.002 && gameState === 'PLAYING') {
             let squadSize = Math.floor(Math.random() * 2) + 1;
             let a = Math.random() * Math.PI * 2;
             let r = (width / zoom) * 1.8;
